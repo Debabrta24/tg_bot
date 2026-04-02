@@ -2,6 +2,9 @@ require("dotenv").config();
 const { Telegraf, Markup } = require("telegraf");
 const mongoose = require("mongoose");
 const QRCode = require("qrcode");
+const express = require("express")
+const app = express()
+
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = parseInt(process.env.ADMIN_ID);
@@ -88,7 +91,7 @@ bot.on("text", async (ctx) => {
       if (!u.userId) continue;
       try {
         await bot.telegram.sendMessage(u.userId, ctx.message.text);
-      } catch {}
+      } catch { }
     }
 
     broadcastMode = false;
@@ -288,7 +291,7 @@ bot.action("disagree", (ctx) => {
 bot.action(/paid_(.+)/, async (ctx) => {
   const coupon = await Coupon.findById(ctx.match[1]);
 
-  try { await ctx.deleteMessage(); } catch {}
+  try { await ctx.deleteMessage(); } catch { }
 
   await bot.telegram.sendMessage(
     ADMIN_ID,
@@ -325,3 +328,7 @@ bot.action(/reject_(.+)/, async (ctx) => {
 
 bot.launch();
 console.log("🤖 Bot running...");
+
+app.listen(3000, () => {
+  console.log("server started")
+})
