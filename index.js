@@ -40,6 +40,7 @@ bot.start(async (ctx) => {
     await User.updateOne({ userId }, { userId }, { upsert: true });
   }
 
+  // ADMIN PANEL
   if (userId === ADMIN_ID) {
     return ctx.reply(
       "👑 ADMIN PANEL",
@@ -56,6 +57,7 @@ bot.start(async (ctx) => {
     );
   }
 
+  // USER PANEL
   const coupons = await Coupon.find();
 
   let buttons = coupons.map((c) => [
@@ -74,12 +76,11 @@ bot.start(async (ctx) => {
   );
 });
 
-
-// ===== ADMIN TEXT FLOW =====
+// ===== TEXT HANDLER =====
 bot.on("text", async (ctx) => {
   const userId = ctx.from.id;
 
-  // ===== BROADCAST =====
+  // BROADCAST
   if (userId === ADMIN_ID && broadcastMode) {
     const users = await User.find();
 
@@ -94,11 +95,11 @@ bot.on("text", async (ctx) => {
     return ctx.reply("✅ Broadcast Sent");
   }
 
-  // ===== ADMIN ADD / EDIT =====
+  // ADMIN ADD / EDIT
   if (userId === ADMIN_ID && adminState[userId]) {
     let state = adminState[userId];
 
-    // ADD FLOW
+    // ADD
     if (state.mode === "add") {
       if (state.step === "name") {
         state.name = ctx.message.text;
@@ -128,7 +129,7 @@ bot.on("text", async (ctx) => {
       }
     }
 
-    // EDIT FLOW
+    // EDIT
     if (state.mode === "edit_value") {
       const coupon = await Coupon.findById(state.couponId);
 
@@ -137,17 +138,14 @@ bot.on("text", async (ctx) => {
       if (state.field === "stock") coupon.stock = parseInt(ctx.message.text);
 
       await coupon.save();
-
       delete adminState[userId];
       return ctx.reply("✅ Coupon Updated");
     }
   }
 
-  // ===== ADMIN REPLY =====
+  // ADMIN REPLY
   if (userId === ADMIN_ID && ctx.message.reply_to_message) {
-    const text = ctx.message.reply_to_message.text;
-    const match = text.match(/User ID: (\d+)/);
-
+    const match = ctx.message.reply_to_message.text.match(/User ID: (\d+)/);
     if (!match) return;
 
     await bot.telegram.sendMessage(
@@ -157,7 +155,7 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // ===== USER → ADMIN =====
+  // USER MESSAGE → ADMIN
   if (userId !== ADMIN_ID) {
     await bot.telegram.sendMessage(
       ADMIN_ID,
@@ -168,38 +166,34 @@ bot.on("text", async (ctx) => {
   }
 });
 
-
-// ===== ADD =====
+// ===== ADMIN BUTTONS =====
 bot.action("add_coupon", (ctx) => {
   adminState[ctx.from.id] = { mode: "add", step: "name" };
   ctx.reply("Enter Coupon Name:");
 });
 
-
-// ===== VIEW =====
 bot.action("view_coupon", async (ctx) => {
   const coupons = await Coupon.find();
   let text = coupons.map(c => `${c.name} | ₹${c.price} | Stock:${c.stock}`).join("\n");
   ctx.reply(text || "No coupons");
 });
 
-
 // ===== EDIT =====
 bot.action("edit_coupon", async (ctx) => {
   const coupons = await Coupon.find();
 
   let buttons = coupons.map(c => [
-    Markup.button.callback(`${c.name}`, `edit_select_${c._id}`)
+    Markup.button.callback(c.name, `edit_select_${c._id}`)
   ]);
 
-  ctx.reply("Select coupon to edit", Markup.inlineKeyboard(buttons));
+  ctx.reply("Select coupon", Markup.inlineKeyboard(buttons));
 });
 
 bot.action(/edit_select_(.+)/, (ctx) => {
   const id = ctx.match[1];
 
   ctx.reply(
-    "What do you want to edit?",
+    "What to edit?",
     Markup.inlineKeyboard([
       [Markup.button.callback("Name", `edit_field_name_${id}`)],
       [Markup.button.callback("Price", `edit_field_price_${id}`)],
@@ -209,35 +203,30 @@ bot.action(/edit_select_(.+)/, (ctx) => {
 });
 
 bot.action(/edit_field_(.+)_(.+)/, (ctx) => {
-  const field = ctx.match[1];
-  const id = ctx.match[2];
-
   adminState[ctx.from.id] = {
     mode: "edit_value",
-    field,
-    couponId: id,
+    field: ctx.match[1],
+    couponId: ctx.match[2],
   };
 
-  ctx.reply(`Enter new ${field}:`);
+  ctx.reply(`Enter new ${ctx.match[1]}`);
 });
-
 
 // ===== DELETE =====
 bot.action("delete_coupon", async (ctx) => {
   const coupons = await Coupon.find();
 
   let buttons = coupons.map(c => [
-    Markup.button.callback(`${c.name}`, `delete_${c._id}`)
+    Markup.button.callback(c.name, `delete_${c._id}`)
   ]);
 
-  ctx.reply("Select coupon to delete", Markup.inlineKeyboard(buttons));
+  ctx.reply("Select coupon", Markup.inlineKeyboard(buttons));
 });
 
 bot.action(/delete_(.+)/, async (ctx) => {
   await Coupon.findByIdAndDelete(ctx.match[1]);
-  ctx.reply("❌ Coupon Deleted");
+  ctx.reply("❌ Deleted");
 });
-
 
 // ===== BROADCAST =====
 bot.action("broadcast", (ctx) => {
@@ -245,26 +234,55 @@ bot.action("broadcast", (ctx) => {
   ctx.reply("Send message:");
 });
 
-
-// ===== BUY =====
+// ===== BUY → DISCLAIMER =====
 bot.action(/buy_(.+)/, async (ctx) => {
-  const coupon = await Coupon.findById(ctx.match[1]);
+  const id = ctx.match[1];
+  const coupon = await Coupon.findById(id);
 
-  if (!coupon || coupon.stock <= 0) return ctx.reply("Out of stock");
+  if (!coupon || coupon.stock <= 0) {
+    return ctx.reply("❌ Out of stock");
+  }
 
-  const qr = await QRCode.toBuffer(`upi://pay?pa=debabrata17@fam&am=${coupon.price}`);
+  ctx.reply(
+    `⚠️ *Disclaimer*\n\n• This coupon is valid only for new accounts\n• No refund available\n• Buy at your own risk\n• All coupons are properly checked\n\nDo you agree?`,
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback("✅ I Agree", `agree_${id}`),
+          Markup.button.callback("❌ Disagree", "disagree"),
+        ],
+      ]),
+    }
+  );
+});
+
+// ===== AGREE =====
+bot.action(/agree_(.+)/, async (ctx) => {
+  const id = ctx.match[1];
+  const coupon = await Coupon.findById(id);
+
+  const qr = await QRCode.toBuffer(
+    `upi://pay?pa=yourupi@upi&am=${coupon.price}`
+  );
+
+  await ctx.editMessageText("✅ Proceed to payment");
 
   ctx.replyWithPhoto(
     { source: qr },
     {
       caption: `💳 Pay ₹${coupon.price}`,
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("I Paid", `paid_${coupon._id}`)]
-      ])
+        [Markup.button.callback("✅ I Have Paid", `paid_${id}`)],
+      ]),
     }
   );
 });
 
+// ===== DISAGREE =====
+bot.action("disagree", (ctx) => {
+  ctx.editMessageText("❌ Cancelled");
+});
 
 // ===== PAID =====
 bot.action(/paid_(.+)/, async (ctx) => {
@@ -286,7 +304,6 @@ bot.action(/paid_(.+)/, async (ctx) => {
   ctx.reply("Waiting for approval...");
 });
 
-
 // ===== APPROVE =====
 bot.action(/approve_(.+)_(.+)/, async (ctx) => {
   const userId = ctx.match[1];
@@ -300,13 +317,11 @@ bot.action(/approve_(.+)_(.+)/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
 });
 
-
 // ===== REJECT =====
 bot.action(/reject_(.+)/, async (ctx) => {
   await bot.telegram.sendMessage(ctx.match[1], "Rejected");
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
 });
-
 
 bot.launch();
 console.log("🤖 Bot running...");
