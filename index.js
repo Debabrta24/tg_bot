@@ -8,12 +8,12 @@ const app = express()
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = parseInt(process.env.ADMIN_ID);
 
-// ===== ERROR SAFE =====
+//   ERROR SAFE  
 bot.catch(console.error);
 process.on("uncaughtException", console.error);
 process.on("unhandledRejection", console.error);
 
-// ===== DB =====
+//   DB  
 mongoose.connect(process.env.MONGO_URI);
 
 const userSchema = new mongoose.Schema({
@@ -30,11 +30,11 @@ const couponSchema = new mongoose.Schema({
 const User = mongoose.model("User", userSchema);
 const Coupon = mongoose.model("Coupon", couponSchema);
 
-// ===== STATE =====
+//   STATE  
 let adminState = {};
 let broadcastMode = false;
 
-// ===== START =====
+//   START  
 bot.start(async (ctx) => {
   const userId = ctx.from.id;
 
@@ -78,7 +78,7 @@ bot.start(async (ctx) => {
   );
 });
 
-// ===== TEXT HANDLER =====
+//   TEXT HANDLER  
 bot.on("text", async (ctx) => {
   const userId = ctx.from.id;
 
@@ -168,7 +168,7 @@ bot.on("text", async (ctx) => {
   }
 });
 
-// ===== ADMIN BUTTONS =====
+//   ADMIN BUTTONS  
 bot.action("add_coupon", (ctx) => {
   adminState[ctx.from.id] = { mode: "add", step: "name" };
   ctx.reply("Enter Coupon Name:");
@@ -180,7 +180,7 @@ bot.action("view_coupon", async (ctx) => {
   ctx.reply(text || "No coupons");
 });
 
-// ===== EDIT =====
+//   EDIT  
 bot.action("edit_coupon", async (ctx) => {
   const coupons = await Coupon.find();
 
@@ -214,7 +214,7 @@ bot.action(/edit_field_(.+)_(.+)/, (ctx) => {
   ctx.reply(`Enter new ${ctx.match[1]}`);
 });
 
-// ===== DELETE =====
+//   DELETE  
 bot.action("delete_coupon", async (ctx) => {
   const coupons = await Coupon.find();
 
@@ -230,13 +230,13 @@ bot.action(/delete_(.+)/, async (ctx) => {
   ctx.reply("❌ Deleted");
 });
 
-// ===== BROADCAST =====
+//   BROADCAST  
 bot.action("broadcast", (ctx) => {
   broadcastMode = true;
   ctx.reply("Send message:");
 });
 
-// ===== BUY → DISCLAIMER =====
+//   BUY → DISCLAIMER  
 bot.action(/buy_(.+)/, async (ctx) => {
   const id = ctx.match[1];
   const coupon = await Coupon.findById(id);
@@ -259,7 +259,7 @@ bot.action(/buy_(.+)/, async (ctx) => {
   );
 });
 
-// ===== AGREE =====
+//   AGREE  
 bot.action(/agree_(.+)/, async (ctx) => {
   const id = ctx.match[1];
   const coupon = await Coupon.findById(id);
@@ -281,12 +281,12 @@ bot.action(/agree_(.+)/, async (ctx) => {
   );
 });
 
-// ===== DISAGREE =====
+//   DISAGREE  
 bot.action("disagree", (ctx) => {
   ctx.editMessageText("❌ Cancelled");
 });
 
-// ===== PAID =====
+//   PAID  
 bot.action(/paid_(.+)/, async (ctx) => {
   const coupon = await Coupon.findById(ctx.match[1]);
 
@@ -306,7 +306,7 @@ bot.action(/paid_(.+)/, async (ctx) => {
   ctx.reply("Waiting for approval...");
 });
 
-// ===== APPROVE =====
+//   APPROVE  
 bot.action(/approve_(.+)_(.+)/, async (ctx) => {
   const userId = ctx.match[1];
   const coupon = await Coupon.findById(ctx.match[2]);
@@ -319,7 +319,7 @@ bot.action(/approve_(.+)_(.+)/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
 });
 
-// ===== REJECT =====
+//   REJECT  
 bot.action(/reject_(.+)/, async (ctx) => {
   await bot.telegram.sendMessage(ctx.match[1], "Rejected");
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
