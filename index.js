@@ -6,8 +6,8 @@ const QRCode = require("qrcode");
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = parseInt(process.env.ADMIN_ID);
 
-// ===== GLOBAL ERROR HANDLER =====
-bot.catch((err) => console.log("BOT ERROR:", err));
+// ===== ERROR SAFE =====
+bot.catch(console.error);
 process.on("uncaughtException", console.error);
 process.on("unhandledRejection", console.error);
 
@@ -36,16 +36,10 @@ let broadcastMode = false;
 bot.start(async (ctx) => {
   const userId = ctx.from.id;
 
-  // save user safely
   if (userId) {
-    await User.updateOne(
-      { userId },
-      { userId },
-      { upsert: true }
-    );
+    await User.updateOne({ userId }, { userId }, { upsert: true });
   }
 
-  // ===== ADMIN =====
   if (userId === ADMIN_ID) {
     return ctx.reply(
       "👑 ADMIN PANEL",
@@ -54,13 +48,14 @@ bot.start(async (ctx) => {
         ...Markup.inlineKeyboard([
           [Markup.button.callback("➕ Add Coupon", "add_coupon")],
           [Markup.button.callback("📦 View Coupons", "view_coupon")],
+          [Markup.button.callback("✏️ Edit Coupon", "edit_coupon")],
+          [Markup.button.callback("❌ Delete Coupon", "delete_coupon")],
           [Markup.button.callback("📢 Broadcast", "broadcast")],
         ]),
       }
     );
   }
 
-  // ===== USER =====
   const coupons = await Coupon.find();
 
   let buttons = coupons.map((c) => [
@@ -80,84 +75,85 @@ bot.start(async (ctx) => {
 });
 
 
-// ===== TEXT HANDLER =====
+// ===== ADMIN TEXT FLOW =====
 bot.on("text", async (ctx) => {
   const userId = ctx.from.id;
 
-  // ===== BROADCAST FIX =====
+  // ===== BROADCAST =====
   if (userId === ADMIN_ID && broadcastMode) {
     const users = await User.find();
 
     for (let u of users) {
       if (!u.userId) continue;
-
       try {
         await bot.telegram.sendMessage(u.userId, ctx.message.text);
-      } catch (err) {
-        console.log("❌ Failed user:", u.userId);
-      }
+      } catch {}
     }
 
     broadcastMode = false;
     return ctx.reply("✅ Broadcast Sent");
   }
 
-  // ===== ADMIN ADD FLOW =====
+  // ===== ADMIN ADD / EDIT =====
   if (userId === ADMIN_ID && adminState[userId]) {
     let state = adminState[userId];
 
-    if (state.step === "name") {
-      state.name = ctx.message.text;
-      state.step = "price";
-      return ctx.reply("Enter Price:");
+    // ADD FLOW
+    if (state.mode === "add") {
+      if (state.step === "name") {
+        state.name = ctx.message.text;
+        state.step = "price";
+        return ctx.reply("Enter Price:");
+      }
+      if (state.step === "price") {
+        state.price = parseInt(ctx.message.text);
+        state.step = "stock";
+        return ctx.reply("Enter Stock:");
+      }
+      if (state.step === "stock") {
+        state.stock = parseInt(ctx.message.text);
+        state.step = "codes";
+        return ctx.reply("Enter Codes:");
+      }
+      if (state.step === "codes") {
+        const codes = ctx.message.text.split(",");
+        await Coupon.create({
+          name: state.name,
+          price: state.price,
+          stock: state.stock,
+          codes,
+        });
+        delete adminState[userId];
+        return ctx.reply("✅ Coupon Added");
+      }
     }
 
-    if (state.step === "price") {
-      state.price = parseInt(ctx.message.text);
-      state.step = "stock";
-      return ctx.reply("Enter Stock:");
-    }
+    // EDIT FLOW
+    if (state.mode === "edit_value") {
+      const coupon = await Coupon.findById(state.couponId);
 
-    if (state.step === "stock") {
-      state.stock = parseInt(ctx.message.text);
-      state.step = "codes";
-      return ctx.reply("Enter Codes (comma separated):");
-    }
+      if (state.field === "name") coupon.name = ctx.message.text;
+      if (state.field === "price") coupon.price = parseInt(ctx.message.text);
+      if (state.field === "stock") coupon.stock = parseInt(ctx.message.text);
 
-    if (state.step === "codes") {
-      const codes = ctx.message.text.split(",");
-
-      await Coupon.create({
-        name: state.name,
-        price: state.price,
-        stock: state.stock,
-        codes,
-      });
+      await coupon.save();
 
       delete adminState[userId];
-      return ctx.reply("✅ Coupon Added");
+      return ctx.reply("✅ Coupon Updated");
     }
   }
 
   // ===== ADMIN REPLY =====
   if (userId === ADMIN_ID && ctx.message.reply_to_message) {
     const text = ctx.message.reply_to_message.text;
-
     const match = text.match(/User ID: (\d+)/);
 
-    if (!match) return ctx.reply("❌ Cannot find user");
+    if (!match) return;
 
-    const targetUser = match[1];
-
-    try {
-      await bot.telegram.sendMessage(
-        targetUser,
-        `💬 Admin Reply:\n\n${ctx.message.text}`
-      );
-    } catch {
-      ctx.reply("❌ Failed to send");
-    }
-
+    await bot.telegram.sendMessage(
+      match[1],
+      `💬 Admin Reply:\n\n${ctx.message.text}`
+    );
     return;
   }
 
@@ -168,53 +164,103 @@ bot.on("text", async (ctx) => {
       `📩 New Message\n\n👤 User ID: ${userId}\n💬 ${ctx.message.text}`
     );
 
-    return ctx.reply("📨 Message sent to admin");
+    return ctx.reply("📨 Sent to admin");
   }
 });
 
 
-// ===== ADMIN BUTTONS =====
+// ===== ADD =====
 bot.action("add_coupon", (ctx) => {
-  adminState[ctx.from.id] = { step: "name" };
+  adminState[ctx.from.id] = { mode: "add", step: "name" };
   ctx.reply("Enter Coupon Name:");
 });
 
-bot.action("broadcast", (ctx) => {
-  broadcastMode = true;
-  ctx.reply("📢 Send message:");
-});
 
+// ===== VIEW =====
 bot.action("view_coupon", async (ctx) => {
   const coupons = await Coupon.find();
-
-  let text = coupons
-    .map((c) => `${c.name} | ₹${c.price} | Stock:${c.stock}`)
-    .join("\n");
-
+  let text = coupons.map(c => `${c.name} | ₹${c.price} | Stock:${c.stock}`).join("\n");
   ctx.reply(text || "No coupons");
+});
+
+
+// ===== EDIT =====
+bot.action("edit_coupon", async (ctx) => {
+  const coupons = await Coupon.find();
+
+  let buttons = coupons.map(c => [
+    Markup.button.callback(`${c.name}`, `edit_select_${c._id}`)
+  ]);
+
+  ctx.reply("Select coupon to edit", Markup.inlineKeyboard(buttons));
+});
+
+bot.action(/edit_select_(.+)/, (ctx) => {
+  const id = ctx.match[1];
+
+  ctx.reply(
+    "What do you want to edit?",
+    Markup.inlineKeyboard([
+      [Markup.button.callback("Name", `edit_field_name_${id}`)],
+      [Markup.button.callback("Price", `edit_field_price_${id}`)],
+      [Markup.button.callback("Stock", `edit_field_stock_${id}`)],
+    ])
+  );
+});
+
+bot.action(/edit_field_(.+)_(.+)/, (ctx) => {
+  const field = ctx.match[1];
+  const id = ctx.match[2];
+
+  adminState[ctx.from.id] = {
+    mode: "edit_value",
+    field,
+    couponId: id,
+  };
+
+  ctx.reply(`Enter new ${field}:`);
+});
+
+
+// ===== DELETE =====
+bot.action("delete_coupon", async (ctx) => {
+  const coupons = await Coupon.find();
+
+  let buttons = coupons.map(c => [
+    Markup.button.callback(`${c.name}`, `delete_${c._id}`)
+  ]);
+
+  ctx.reply("Select coupon to delete", Markup.inlineKeyboard(buttons));
+});
+
+bot.action(/delete_(.+)/, async (ctx) => {
+  await Coupon.findByIdAndDelete(ctx.match[1]);
+  ctx.reply("❌ Coupon Deleted");
+});
+
+
+// ===== BROADCAST =====
+bot.action("broadcast", (ctx) => {
+  broadcastMode = true;
+  ctx.reply("Send message:");
 });
 
 
 // ===== BUY =====
 bot.action(/buy_(.+)/, async (ctx) => {
-  const id = ctx.match[1];
-  const coupon = await Coupon.findById(id);
+  const coupon = await Coupon.findById(ctx.match[1]);
 
-  if (!coupon || coupon.stock <= 0) {
-    return ctx.reply("❌ Out of stock");
-  }
+  if (!coupon || coupon.stock <= 0) return ctx.reply("Out of stock");
 
-  const qr = await QRCode.toBuffer(
-    `upi://pay?pa=debabrata17@fam&am=${coupon.price}`
-  );
+  const qr = await QRCode.toBuffer(`upi://pay?pa=debabrata17@fam&am=${coupon.price}`);
 
   ctx.replyWithPhoto(
     { source: qr },
     {
       caption: `💳 Pay ₹${coupon.price}`,
       ...Markup.inlineKeyboard([
-        [Markup.button.callback("✅ I Have Paid", `paid_${id}`)],
-      ]),
+        [Markup.button.callback("I Paid", `paid_${coupon._id}`)]
+      ])
     }
   );
 });
@@ -222,78 +268,45 @@ bot.action(/buy_(.+)/, async (ctx) => {
 
 // ===== PAID =====
 bot.action(/paid_(.+)/, async (ctx) => {
-  const id = ctx.match[1];
-  const coupon = await Coupon.findById(id);
+  const coupon = await Coupon.findById(ctx.match[1]);
 
   try { await ctx.deleteMessage(); } catch {}
 
-  const time = new Date().toLocaleString();
-
   await bot.telegram.sendMessage(
     ADMIN_ID,
-    `💰 Payment Request\n\n👤 User: ${ctx.from.id}\n🎟 Coupon: ${coupon.name}\n💰 ₹${coupon.price}\n🕒 ${time}`,
+    `💰 Payment\n👤 User: ${ctx.from.id}\n🎟 ${coupon.name}\n₹${coupon.price}`,
     Markup.inlineKeyboard([
       [
-        Markup.button.callback(
-          "✅ Approve",
-          `approve_${ctx.from.id}_${id}`
-        ),
-        Markup.button.callback(
-          "❌ Reject",
-          `reject_${ctx.from.id}`
-        ),
-      ],
+        Markup.button.callback("Approve", `approve_${ctx.from.id}_${coupon._id}`),
+        Markup.button.callback("Reject", `reject_${ctx.from.id}`)
+      ]
     ])
   );
 
-  ctx.reply("⏳ Waiting for approval...");
+  ctx.reply("Waiting for approval...");
 });
 
 
 // ===== APPROVE =====
 bot.action(/approve_(.+)_(.+)/, async (ctx) => {
   const userId = ctx.match[1];
-  const couponId = ctx.match[2];
-
-  const coupon = await Coupon.findById(couponId);
-
-  if (!coupon || coupon.stock <= 0) {
-    return ctx.answerCbQuery("❌ No stock");
-  }
+  const coupon = await Coupon.findById(ctx.match[2]);
 
   const code = coupon.codes.pop();
   coupon.stock -= 1;
   await coupon.save();
 
-  await bot.telegram.sendMessage(
-    userId,
-    `🎉 Payment Approved!\n\n🎟 Code: ${code}`
-  );
-
+  await bot.telegram.sendMessage(userId, `🎟 Code: ${code}`);
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
 });
 
 
 // ===== REJECT =====
 bot.action(/reject_(.+)/, async (ctx) => {
-  const userId = ctx.match[1];
-
-  await bot.telegram.sendMessage(userId, "❌ Payment Rejected");
+  await bot.telegram.sendMessage(ctx.match[1], "Rejected");
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
 });
 
 
-// ===== RUN =====
 bot.launch();
 console.log("🤖 Bot running...");
-
-
-const express = require("express");
-const app = express();
-
-app.get("/", (req, res) => {
-  res.send("Bot is running...");
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
