@@ -263,7 +263,7 @@ bot.action(/agree_(.+)/, async (ctx) => {
   const coupon = await Coupon.findById(id);
 
   const qr = await QRCode.toBuffer(
-    `upi://pay?pa=yourupi@upi&am=${coupon.price}`
+    `upi://pay?pa=debabrata17@fam&am=${coupon.price}`
   );
 
   await ctx.editMessageText("✅ Proceed to payment");
