@@ -5,7 +5,6 @@ const QRCode = require("qrcode");
 const express = require("express")
 const app = express()
 
-
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = parseInt(process.env.ADMIN_ID);
 
